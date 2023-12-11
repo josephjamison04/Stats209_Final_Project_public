@@ -465,7 +465,7 @@ ggplot(aipw_plot_df, aes(x = min_ket_dose, y = tau_hat_aipw, ymin = CI_lower, ym
   geom_errorbar(width = 0.05) +
   geom_hline(yintercept = 0, linetype = 2, col = rgb(0, 0, 0, alpha = 0.5)) +
   theme_bw() +
-  labs(x = "Dosage Threshold", y = "Effect Estimate") +
+  labs(x = "Minimum Dosage (mg/kg)", y = "Effect Estimate") +
   scale_x_continuous(breaks = min_ket_dose) + 
   theme(axis.text = element_text(size = 14), axis.title = element_text(size = 14))
 ggsave("aipw-sensitivity.png", width = 7, height = 4)

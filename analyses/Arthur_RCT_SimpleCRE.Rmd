@@ -22,25 +22,10 @@ tau_hat
 ```
 
 ```{r}
-var_tau_hat <- var(rct$delta_day7) /9
-sd_tau_hat <- sqrt(var_tau_hat)
-sd_tau_hat
-```
-```{r}
-print(c("95% Confidence Interval:"))
-print(c(tau_hat - 1.96*sd_tau_hat, tau_hat + 1.96*sd_tau_hat))
-```
-
-```{r}
-tau_hat <- -diff((rct %>% select(day7, rand) %>% group_by(rand) %>% summarize(tau=mean(day7)))$tau)
-tau_hat
-```
-
-```{r}
 n1 <- sum(rct$rand == 1)
 n0 <- sum(rct$rand == 2)
 
-var_tau_hat <- var(rct$day7[rct$rand == 2]) / n0 + var(rct$day7[rct$rand == 1]) / n1
+var_tau_hat <- var(rct$delta_day7[rct$rand == 1]) / n1 + var(rct$delta_day7[rct$rand == 2]) / n0
 sd_tau_hat <- sqrt(var_tau_hat)
 sd_tau_hat
 ```
