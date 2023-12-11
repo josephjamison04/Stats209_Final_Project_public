@@ -1,0 +1,193 @@
+---
+title: "Observational Study Analysis"
+author: 'Ethan Allavarpu'
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(DOS2)
+library(optmatch)
+library(RItools)
+library(tidyverse)
+source("utility.R")
+```
+
+```{r}
+library(tidyverse)
+data <- read_csv("../datasets/processed/Observational_Data.csv") %>%
+  filter(!is.na(surg_type))
+data$z <- data$a_ketamine
+data$D <- data$ket_per_kg
+data$Y <- data$phq_delta
+```
+
+```{r}
+data %>%
+  group_by(z) %>%
+  summarise(
+    avg_pre = mean(day0),
+    avg_post = mean(day7)
+  )
+```
+
+
+
+```{r}
+data %>% filter(z == 1) %>%
+  ggplot(aes(x = ket_per_kg)) +
+  geom_histogram(binwidth = 0.1, fill = rgb(0, 0, 2 / 3, alpha = 1)) +
+  theme_bw() +
+  expand_limits(x = 0) +
+  labs(x = "Ketamine Dosage (mg/kg)", y = "Count") +
+  theme(axis.text=element_text(size=14),
+        axis.title=element_text(size=14))
+ggsave("ket-dose-hist.png", width = 7, height = 4)
+```
+
+```{r}
+ggplot(data = data, aes(x = day0)) +
+  geom_histogram(binwidth = 1) +
+  facet_wrap(~ z)
+
+ggplot(data = data, aes(x = Y)) +
+  geom_histogram(binwidth = 1) +
+  facet_wrap(~ z)
+
+ggplot(data = data, aes(x = ket_per_kg)) +
+  geom_histogram() +
+  facet_wrap(~ z)
+```
+
+
+\pagebreak
+
+
+
+# Analysis
+
+ate
+[1]  0.71875000  0.09523810  0.22807018  0.09756098 -0.25000000
+
+## Matching
+```{r}
+get_matching_estimator <- function(df, plotting = FALSE) {
+  df$prop <- glm(
+    z ~ age + sex + bmi + a_los + day0, family = binomial,
+    data = data_subset
+  )$fitted.values
+  
+  matching_matrix <- match_on(
+    z ~ age + sex + bmi + a_los + day0, family = binomial,
+    data = df,
+    method = "rank_mahalanobis"
+  )
+  matching_matrix <- with(df, addcaliper(matching_matrix, z, prop))
+  matched_pairs <- pairmatch(matching_matrix, data = df)
+  pair_summary <- summarize.match(df, matched_pairs)
+  
+  if (plotting) {
+    plot(
+      xBalance(
+        z ~ age + sex + bmi + a_los + day0, data = df,
+        strata = list(Unstratified = NULL, Matched = ~ matched_pairs)
+      )
+    )
+  }
+  
+ mean(pair_summary$Y.1 - pair_summary$Y.0)
+}
+
+get_matching_inference <- function(df, M) {
+  bootstrap_estimates <- numeric(M)
+  observed_estimate <- get_matching_estimator(df)
+  n <- nrow(df)
+  
+  for (i in seq_len(M)) {
+    bootstrap_idx <- sample(seq_len(n), n, replace = TRUE)
+    bootstrap_df <- df[bootstrap_idx, ]
+    bootstrap_estimates[i] <- get_matching_estimator(bootstrap_df)
+  }
+  p_val <- mean(abs(bootstrap_estimates) >= abs(observed_estimate))
+  V_hat <- var(bootstrap_estimates)
+  ci <- c(observed_estimate - 1.96 * sqrt(V_hat), observed_estimate + 1.96 * sqrt(V_hat))
+  
+  list("tau_hat" = observed_estimate, "p_val" = p_val, "ci" = ci)
+}
+
+
+set.seed(209)
+min_ket_dose <- seq(0.2, 0.6, by = 0.1)
+ate <- numeric(length(min_ket_dose))
+cis <- matrix(nrow = length(min_ket_dose), ncol = 2)
+p_vals <- numeric(length(min_ket_dose))
+
+for (j in seq_along(min_ket_dose)) {
+  dosage <- min_ket_dose[j]
+  print(dosage)
+  data_subset <- data %>% filter((ket_per_kg >= dosage) | (z == 0))
+  results <- get_matching_inference(data_subset, M = 1000)
+  ate[j] <- results[["tau_hat"]]
+  p_vals[j] <- results[["p_val"]]
+  cis[j, ] <- results[["ci"]]
+}
+
+matching_plot_df <- cbind(min_ket_dose, ate, cis)
+colnames(matching_plot_df) <- c("min_dosage", "ate", "lb", "ub")
+matching_plot_df <- as.data.frame(matching_plot_df)
+
+ggplot(matching_plot_df, aes(x = min_dosage, y = ate, ymin = lb, ymax = ub)) +
+  geom_point() +
+  geom_errorbar(width = 0.05) +
+  geom_hline(yintercept = 0, linetype = 2, col = rgb(0, 0, 0, alpha = 0.5)) +
+  theme_bw() +
+  labs(x = "Dosage Threshold", y = "Effect Estimate") +
+  scale_x_continuous(breaks = min_ket_dose) +
+  theme(axis.text = element_text(size = 14), axis.title = element_text(size = 14))
+```
+
+## Regression Adjustment (LM Robust)
+```{r}
+library(estimatr)
+set.seed(209)
+min_ket_dose <- seq(0.2, 0.6, by = 0.1)
+ate <- numeric(length(min_ket_dose))
+cis <- matrix(nrow = length(min_ket_dose), ncol = 2)
+
+for (i in seq_along(min_ket_dose)) {
+  dosage <- min_ket_dose[i]
+  data_subset <- data %>% filter((ket_per_kg >= dosage) | (z == 0))
+  Y <- data_subset$day7 - data_subset$day0
+  Z <- data_subset$z
+  X <- model.matrix(~ age + bmi + sex + a_los + day0, data = data_subset)[, -1]
+  X <- scale(X, center = TRUE, scale = FALSE)
+  lm_robust_summary <- summary(estimatr::lm_robust(Y ~ Z + X + Z * X))
+  
+  print(mean(predict(lm(day7 ~ age + bmi + sex + a_los + day0, data = data_subset, subset = z == 1), newdata = data_subset) - predict(lm(day7 ~ age + bmi + sex + a_los + day0, data = data_subset, subset = z == 0), newdata = data_subset)))
+  ate[i] <- lm_robust_summary$coefficients["Z", "Estimate"]
+  cis[i, ] <- lm_robust_summary$coefficients["Z", c("CI Lower", "CI Upper")]
+}
+plot_df <- cbind(min_ket_dose, ate, cis)
+colnames(plot_df) <- c("min_dosage", "ate", "lb", "ub")
+plot_df <- as.data.frame(plot_df)
+ggplot(plot_df, aes(x = min_dosage, y = ate, ymin = lb, ymax = ub)) +
+  geom_point() +
+  geom_errorbar(width = 0.05) +
+  geom_hline(yintercept = 0, linetype = 2, col = rgb(0, 0, 0, alpha = 0.5)) +
+  theme_bw() +
+  labs(x = "Dosage Threshold", y = "Effect Estimate") +
+  scale_x_continuous(breaks = min_ket_dose) +
+  theme(axis.text=element_text(size=14),
+        axis.title=element_text(size=14))
+ggsave("obs_data_regression_adjustment.png", width = 7, height = 4)
+```
+
+```{r}
+data_subset <- data %>% filter((ket_per_kg >= 0.5) | (z == 0))
+Y <- data_subset$day7
+Z <- data_subset$z
+X <- model.matrix(~ age + bmi + sex + a_los + day0, data = data_subset)[, -1]
+X <- scale(X, center = TRUE, scale = FALSE)
+summary(estimatr::lm_robust(Y ~ Z + X + Z * X))
+```

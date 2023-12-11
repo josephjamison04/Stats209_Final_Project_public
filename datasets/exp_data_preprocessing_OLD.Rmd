@@ -1,0 +1,39 @@
+---
+title: "Stats209_finalProject_joe"
+author: "Joe Jamison"
+date: '`r Sys.Date()`'
+output: pdf_document
+---
+
+```{r}
+# Preprocessing experimental data
+exp_data <- read.csv("RCT_Data.csv")
+exp_data$madrs_date_time <- as.POSIXct(exp_data$madrs_date_time)
+
+# Condense 3 rows per record_id into 1, concatenating follow-up data as new columns
+# Compute elapsed days since baseline MADRS exam
+exp_data_adj <- exp_data[!is.na(exp_data$department_rct), ]
+
+exp_data_adj$madrs_date_time2 <- exp_data[exp_data$redcap_event_name == "day_of_surgery_0_arm_1",]$madrs_date_time
+exp_data_adj$days_since_baseline2 <- as.numeric(round(difftime(exp_data_adj$madrs_date_time2, 
+                                                         exp_data_adj$madrs_date_time, units = "days"), 0))
+exp_data_adj$madrs_score2 <- exp_data[exp_data$redcap_event_name == "day_of_surgery_0_arm_1",]$madrs_score
+
+exp_data_adj$madrs_date_time3 <- exp_data[exp_data$redcap_event_name == "day_7_arm_1",]$madrs_date_time
+exp_data_adj$days_since_baseline3 <- as.numeric(round(difftime(exp_data_adj$madrs_date_time3, 
+                                                         exp_data_adj$madrs_date_time, units = "days"),0))
+exp_data_adj$madrs_score3 <- exp_data[exp_data$redcap_event_name == "day_7_arm_1",]$madrs_score
+
+exp_data_adj$a_los <- exp_data[exp_data$redcap_event_name == "day_of_surgery_0_arm_1",]$a_los
+```
+
+``` {r}
+file_path <- "RCT_Data_adjusted.csv"
+
+write.csv(exp_data_adj, file = file_path, row.names = FALSE)
+```
+
+``` {r}
+obs_data <- read.csv("ObservationalData.csv")
+
+```

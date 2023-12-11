@@ -1,0 +1,53 @@
+record_id	Unique patient identifier
+
+redcap_event_name	Time when data was inputted
+screening_arm_1	Screening (pre-surgery)
+day_of_surgery_0_arm_1	Day of surgery (before surgery)
+day_7_arm_1	Day 7 after surgery
+closeout_arm_1	End of study
+
+rand	Treatment assignment. 1=Ketamine, 2=Placebo, 0=Dropped out, not assigned
+age 	Age at screening, years
+gender	Sex. 1=Male, 2=Female
+
+ethnicity	1=Non-Hispanic/Non-Latino, 2=Hispanic/Latino
+race___1	1=White
+race___2	1=Black/African American
+race___3	1=Asian
+race___5	1=Native Hawaiian/Pacific Islander
+race___6	1=American Indian/Alaska Native
+race___98	1=Unknown
+race___99	1=Other
+
+surg_type	Type of surgery
+2	Abdominal
+6	Cardiology
+17	Dental
+16	Electroconvulsive Therapy
+14	Gastroenterology
+18	General Surgery
+13	Gynecology
+20	Ophthalmology
+3	Neurosurgery - Spine
+4	Neurosurgery - Other
+1	Orthopedics - Joint
+25	Orthopedics - Spine
+11	Orthopedics - Other
+9	Otolaryngology
+8	Plastics
+10	Pain
+19	Podiatry
+15	Interventional Radiology
+26	Neuroradiology
+7	Rad Oncology
+22	Thoracic
+5	Urology
+21	Vascular
+23	Transplant
+24	Pulmonary
+99	Other
+
+phq_rct	Pre-operation PHQ8 score
+bmi	BMI
+a_los	Length of surgery (minutes)
+screening, day0, day1, day2, etc.	MADRS score at screening, Day 0 (day of surgery before surgery), Day 1 (Day 1 after surgery), Day 2, etc.

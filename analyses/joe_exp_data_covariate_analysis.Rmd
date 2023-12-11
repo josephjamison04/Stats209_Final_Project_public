@@ -1,0 +1,474 @@
+---
+title: "joe_exp_data_covariate_analysis"
+author: "Joe Jamison"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r}
+library(DOS2)
+library(optmatch)
+library(RItools)
+library(tidyverse)
+source('utility.R')
+```
+
+```{r}
+# Covariate imbalance visualizations on experimental data
+file_path <- "../datasets/processed/RCT_Data.csv"
+
+exp_data <- read.csv(file_path)
+exp_data$rand <- 2 - exp_data$rand
+
+# WHY DO WE USE DAY 0 AND NOT SCREENING FOR THE DELTA?
+exp_data <- exp_data %>% mutate(delta_day7 = day7 - day0)
+
+# exp_data$madrs_date_time <- as.POSIXct(exp_data$madrs_date_time)
+# exp_data$madrs_date_time2 <- as.POSIXct(exp_data$madrs_date_time2)
+# exp_data$madrs_date_time3 <- as.POSIXct(exp_data$madrs_date_time3)
+```
+
+
+```{r}
+plot(xBalance(rand ~ age + bmi + gender + day0, data=exp_data))
+```
+
+```{r}
+plot(xBalance(rand ~ age + bmi + gender + day0, data=exp_data), ggplot=TRUE, variable.labels = c(age = "Age", bmi = "BMI", gender = "Gender", day0 = "Day 0 MADRS"), groups = NULL, strata.labels = c(unstrat = "No Stratification"), color = "darkblue", include.legend = F, legend = F) +
+  theme_bw() +
+  theme(strip.background = element_blank(),
+        axis.text=element_text(size=10),
+        axis.title=element_text(size=12))
+ggsave("covariate-balance.png", height = 3, width = 6)
+```
+
+
+```{r}
+# Histograms of the most imbalanced covariates
+ggplot(data=exp_data, aes(x= day0)) + 
+  geom_density() + facet_grid(.~rand) + theme_bw() + 
+  ggtitle("Histogram of day0 MADRS score by control and treatment group (RCT Data)")
+ggplot(data=exp_data, aes(x=gender)) + 
+  geom_histogram(bins = 2) + facet_grid(.~rand) + theme_bw() + 
+  ggtitle("Histogram of gender by control and treatment group (RCT Data)")
+ggplot(data=exp_data, aes(x=age)) + 
+  geom_density() + facet_grid(.~rand) + theme_bw() + 
+  ggtitle("Histogram of age by control and treatment group (RCT Data)")
+ggplot(data=exp_data, aes(x=bmi)) + 
+  geom_density() + facet_grid(.~rand) + theme_bw() + 
+  ggtitle("Histogram of bmi by control and treatment group (RCT Data)")
+```
+
+```{r}
+# Histograms of the most imbalanced covariates
+ggplot(data=exp_data, aes(x= day0)) + 
+  geom_histogram(bins = 9) + facet_grid(.~rand) + theme_bw() + 
+  ggtitle("Histogram o")
+with(exp_data, tapply(day0, rand, mean))
+```
+
+
+
+```{r}
+# c("age", "bmi", "gender", "ethnic", "race___1", "race___2", "race___3", 
+#   "race___5", "race___6", "race___98", "race___99", "a_los", "screening")
+
+# Estimate propensity score with logistic regression (excluding race and ethnicity covariates)
+exp_data$prop <- glm(rand ~ age + bmi + gender + a_los + day0, 
+                     family=binomial, data=exp_data)$fitted.values
+
+# Compute close covariate matches between treatment and control groups
+match.1 <- smahal(exp_data$rand, exp_data[, c("age", "bmi", "gender", "a_los", "screening")])
+ms.1 <- pairmatch(match.1, data=exp_data)
+exp_data$z <- exp_data$rand
+summary.1 <- summarize.match(exp_data, ms.1)
+
+exp_data$match <- ms.1
+
+mean(summary.1$delta_day7.1 - summary.1$delta_day7.0)
+```
+
+```{r}
+# Average Treatment effect across all matched pairs in dataset
+
+pair_diffs <- c()
+for (i in unique(ms.1)){
+  temp_df <- exp_data[exp_data$match == i, ]
+  diff <- temp_df[temp_df$rand == 1, ]$delta_day7[1] - temp_df[temp_df$rand == 0, ]$delta_day7[1]
+  pair_diffs <- c(pair_diffs, diff)  
+}
+
+(avg_treat_effect <- mean(pair_diffs))
+(observed_T <- mean(summary.1$delta_day7.1 - summary.1$delta_day7.0))
+# Negative ATE for delta_day7 means that treatment, on average, reduces the MADRS score
+# (level of depression) by more than the placebo
+```
+
+```{r}
+# Perform permutation test to get p-value for ATE for delta_day7
+# Fisher's sharp null: Yi(0) = Yi(1) for all i
+set.seed(5221)
+M = 100000
+extreme_count = 0
+
+for (i in 1:M){
+  Z = rbinom(nrow(summary.1), 1, 0.5)
+  trial_T = mean((2*Z - 1)*(summary.1$delta_day7.1 - summary.1$delta_day7.0))
+  if (trial_T >= observed_T){
+    extreme_count = extreme_count + 1
+  }
+}
+
+paste("p-value:", extreme_count / M)
+```
+
+```{r}
+# regression adjustment accounting for day 0 scores
+library(estimatr)
+Y <- exp_data$delta_day7
+Z <- exp_data$z
+X <- model.matrix(~ age + gender + bmi + a_los + day0, data = exp_data)[, -1]
+X <- scale(X, center = TRUE, scale = FALSE)
+summary(estimatr::lm_robust(Y ~ Z + X + Z * X))
+```
+
+``` {r}
+# # Estimate and CI for beta_hat coefficient for Z (treatment effect) - old implementation without lm_robust
+# (tau_hat_reg_adj <- summary(model_w_day0)$coef["z", "Estimate"])
+# sd_tau_hat_reg_adj <- summary(model_w_day0)$coef["z", "Std. Error"]
+# print(c(tau_hat_reg_adj - 1.96*sd_tau_hat_reg_adj, tau_hat_reg_adj + 1.96*sd_tau_hat_reg_adj))
+```
+
+
+Match based on covariates. Analyze ATE of delta_day7 value
+```{r}
+# Compute close covariate matches between treatment and control groups
+match.2 <- smahal(exp_data$rand, exp_data[, c("age", "bmi", "gender", "a_los", "day0")])
+ms.2 <- pairmatch(match.2, data=exp_data)
+# exp_data$z <- exp_data$rand
+summary.2 <- summarize.match(exp_data, ms.2)
+
+(observed_T2 <- mean(summary.2$delta_day7.1 - summary.2$delta_day7.0))
+
+```
+
+
+```{r}
+# Perform permutation test to get p-value for ATE for day7
+# Fisher's sharp null: Yi(0) = Yi(1) for all i
+set.seed(5221)
+M = 10000
+
+calc_p_value_matching <- function(summary, M, obs_T){ 
+  extreme_count = 0
+  
+  for (i in 1:M){
+    Z = rbinom(nrow(summary), 1, 0.5)
+    trial_T = mean((2*Z - 1)*(summary$delta_day7.1 - summary$delta_day7.0))
+    if (trial_T >= obs_T){
+      extreme_count = extreme_count + 1
+    }
+  }
+  
+  return (extreme_count / M)
+}
+
+paste("p-value:", calc_p_value_matching(summary.2, M, observed_T2))
+```
+
+```{r}
+thresholds <- c(10, 4, 3.5, 2.5, 2)
+# thresholds <- c(0.3)
+remaining_matches <- c()
+
+set.seed(209)
+
+for (i in thresholds){
+  close_enough <- as.numeric(c(names(apply(match.2,1, min)[apply(match.2,1, min) <= i]), colnames(match.2)))
+  subset_df <- exp_data[close_enough, ]
+  rownames(subset_df) <- seq_len(nrow(subset_df))
+  subset_match <- smahal(subset_df$z, subset_df[, c("age", "bmi", "gender", "a_los", "day0")])
+  subset_match <- with(subset_df, addalmostexact(subset_match, z, day0))
+  subset_ms <- pairmatch(subset_match, data=subset_df)
+  # exp_data$z <- exp_data$rand
+  subset_summary <- summarize.match(subset_df, subset_ms)
+
+  (obs_T <- mean(subset_summary$delta_day7.1 - subset_summary$delta_day7.0))
+  p_val <- calc_p_value_matching(subset_summary, M, obs_T)
+  to_print <- paste0("ATE is ", round(obs_T, 2), " with p-value: ", p_val, 
+                     " after prop threshold of ", i, " (", nrow(subset_summary), " matches remaining)")
+  print(to_print)
+  remaining_matches <- c(remaining_matches, nrow(subset_summary))
+}
+```
+
+
+``` {r}
+# Drop matches that have difference in propensity score above certain threshold 
+# and perform sensitivity analysis on the choice of threshold 
+
+summary.2$prop_diff <- abs(summary.2$prop.0 - summary.2$prop.1)
+
+match_analysis_w_threshold <- function(summary, threshold){
+  summary <- summary[summary$prop_diff < threshold, ]
+  obs_T <- mean(summary$delta_day7.1 - summary$delta_day7.0)
+  p_val <- calc_p_value_matching(summary, M, obs_T)
+  
+  return (c(nrow(summary), obs_T, p_val))
+}
+```
+
+```{r}
+prop_differences <- sort(abs(summary.1$prop.1 - summary.1$prop.0))
+n_matches <- as.data.frame(
+  matrix(
+    c(0, prop_differences, 0:length(prop_differences)),
+    ncol = 2
+  )
+)
+colnames(n_matches) <- c("prop_thresh", "n_match")
+n_matches <- as_tibble(n_matches) %>%
+  mutate(next_thresh = replace_na(lead(prop_thresh), 1))
+ggplot(n_matches, aes(x = prop_thresh, xend = next_thresh, y = n_match, yend = n_match)) +
+      geom_point() +  # Solid points to left
+      geom_point(aes(x=next_thresh, y=n_match), shape=1) +  # Open points to right
+      geom_point(aes(x=1, y=18)) +
+      geom_segment() +
+      labs(x = "Propensity Score Threshold", y = "Number of Matches") +
+      theme_bw() +
+  theme(axis.text=element_text(size=14),
+        axis.title=element_text(size=14))
+ggsave("n_matches.png", width = 7, height = 4)
+```
+
+
+```{r}
+# No longer using thresholds based on prop scores
+
+# thresholds <- c(1, 0.55, 0.5, 0.4, 0.36, 0.35, 0.3, 0.2, 0.1)
+# # thresholds <- c(0.3)
+# remaining_matches <- c()
+# 
+# for (i in thresholds){
+#   result <- match_analysis_w_threshold(summary.2, i)
+#   to_print <- paste0("ATE is ", round(result[2], 3), " with p-value: ", result[3], 
+#                      " after prop threshold of ", i, " (", result[1], " matches remaining)")
+#   print(to_print)
+#   remaining_matches <- c(remaining_matches, result[1])
+# }
+# 
+# barplot(remaining_matches, names.arg = thresholds,
+#         col = "skyblue", main = "Remaining Matches at Different Threshold Values",
+#         xlab = "Max absolute difference in prop. score", ylab = "Remaining Matches")
+```
+
+``` {r}
+# Use bins by propensity score instead of matching for SRE
+
+prop_quantiles = c(0, quantile(exp_data$prop, probs = c(.33, .66)), 1)
+
+quantile_counts = data.frame(treated = c(0, 0, 0),
+                             control = c(0, 0, 0))
+
+strata_means = data.frame(treated = c(0, 0, 0),
+                             control = c(0, 0, 0))
+
+for (i in 1:(length(prop_quantiles)-1)){
+  treat_df = subset(exp_data, z== 1 & prop >= prop_quantiles[i] & prop < prop_quantiles[i+1])
+  control_df = subset(exp_data, z== 0 & prop >= prop_quantiles[i] & prop < prop_quantiles[i+1])
+  quantile_counts[i, "control"] = nrow(control_df)
+  quantile_counts[i, "treated"] = nrow(treat_df)
+  strata_means[i, "control"] = mean(control_df$delta_day7)
+  strata_means[i, "treated"] = mean(treat_df$delta_day7)
+}
+rownames(quantile_counts) = c("[0,q33]", "[q33, q66]", "[q66, 1]")
+```
+
+```{r}
+t_hat_s_SRE <- 0
+n <- nrow(exp_data)
+
+for (i in 1:nrow(strata_means)){
+  t_hat_s_SRE <- t_hat_s_SRE + (sum(quantile_counts[i, ]) / n)*(strata_means[i, "treated"] - 
+                                                         strata_means[i, "control"])
+}
+
+# Compute s^2(1) and s^2(0) for SRE
+compute_s2 = function(df){
+  treat_df = subset(df, z == 1)
+  control_df = subset(df, z == 0)
+  n1 = nrow(treat_df)
+  n0 = nrow(control_df)
+  
+  mu_1_y = mean(treat_df$delta_day7)
+  mu_0_y = mean(control_df$delta_day7)
+  
+  s2_1_num = sum((treat_df$delta_day7 - mu_1_y)**2)
+  s2_0_num = sum((control_df$delta_day7 - mu_0_y)**2)
+  
+  return(c(s2_1_num / (n1-1), s2_0_num / (n0-1)))
+}
+
+v_hat_s_SRE <- 0
+
+for (i in 1:(length(prop_quantiles)-1)){
+  quantile_df = subset(exp_data, prop >= prop_quantiles[i] & prop < prop_quantiles[i+1])
+  n1 = quantile_counts[i, "treated"]
+  n0 = quantile_counts[i, "control"]
+  
+  s2_list = compute_s2(quantile_df)
+  
+  v_hat_s_SRE = v_hat_s_SRE + ((n1 + n0)/n)**2 * (s2_list[1]/n1 + s2_list[2]/n0)
+  
+}
+
+upper_CI_SRE <- t_hat_s_SRE + 1.96*sqrt(v_hat_s_SRE)
+lower_CI_SRE <- t_hat_s_SRE - 1.96*sqrt(v_hat_s_SRE)
+
+paste0("ATE for SRE is: ", t_hat_s_SRE)
+paste0("with confidence interval [", lower_CI_SRE, ", ", upper_CI_SRE, "]")
+```
+
+```{r}
+# Perform AIPW analysis on experimental data (note that P(Z|x)=0.5 by definition 
+# in exp_data, so this may not be valid)
+
+compute_aipw_estimator <- function(df){
+  df_Z1 <- subset(df, z == 1)
+  df_Z0 <- subset(df, z == 0)
+  
+  model_1_aipw <- lm(delta_day7 ~ day0 + a_los + gender + age, data = df_Z1)
+  model_0_aipw <- lm(delta_day7 ~ day0 + a_los + gender + age, data = df_Z0)
+  
+  df$preds_1 <- predict(model_1_aipw, newdata = df)
+  df$preds_0 <- predict(model_0_aipw, newdata = df)
+  
+  mu_hat_1_dr <- sum(df$z * (df$delta_day7 - df$preds_1) / df$prop + 
+                       df$preds_1) / nrow(df)
+  mu_hat_0_dr <- sum((1 - df$z) * (df$delta_day7 - df$preds_0) / (1 - df$prop) + 
+                       df$preds_0) / nrow(df)
+  return(mu_hat_1_dr - mu_hat_0_dr)
+}
+
+(tau_hat_aipw <- compute_aipw_estimator(exp_data))
+```
+
+```{r}
+# Bootstap to get p-value for tau_hat_aipw (recompute prop scores in each iteration)
+set.seed(5221)
+M = 1000
+alpha = 0.025
+
+get_aipw_inference <- function(df, M, obs_T){ 
+  extreme_count = 0
+  bootstrap_estimates <- numeric(M)
+
+  for (i in 1:M){
+    idx <- sample(1:nrow(df), nrow(df), replace = TRUE)
+    trial_df <- df[idx, ]
+    trial_df$prop <- glm(z ~ age + bmi + gender + a_los + day0,
+                     family=binomial, data=trial_df)$fitted.values
+    
+    trial_T = compute_aipw_estimator(trial_df)
+    bootstrap_estimates[i] <- trial_T
+
+    if (abs(trial_T) >= abs(obs_T)){
+      extreme_count = extreme_count + 1
+    }
+  }
+  
+  # Empirical CI calculation
+  sorted_diffs <- sort(bootstrap_estimates - obs_T)
+  L <- sorted_diffs[alpha * M]
+  U <- sorted_diffs[(1 - alpha) * M]
+  V_hat <- var(bootstrap_estimates)
+  ci <- c(obs_T - 1.96 * sqrt(V_hat), obs_T + 1.96 * sqrt(V_hat))
+  print(ci)
+  print(c(obs_T - U, obs_T - L))
+  
+  # # CI calculation by variance estimation
+  # V_hat <- var(bootstrap_estimates)
+  # # print(V_hat)
+  # ci <- c(obs_T - 1.96 * sqrt(V_hat), obs_T + 1.96 * sqrt(V_hat))
+  
+  
+  return (list("p_val" = extreme_count / M, "ci" = ci))
+}
+
+#(aipw_inf_result <- get_aipw_inference(exp_data, M, tau_hat_aipw))
+```
+
+```{r}
+# # Non-parametric bootstrap to estimate CI of tau_hat_aipw - MAY NOT BE VALID SINCE 
+# # TAU_HAT IS DIFFERENCE IN MEANS
+# set.seed(10)
+# B = 10000
+# tau_Bs_aipw <- c()
+# 
+# for (i in 1:B){
+#   idx <- sample(1:nrow(exp_data), nrow(exp_data), replace = TRUE)
+#   resampled_df <- exp_data[idx, ]
+#   tau_Bs_aipw <- c(tau_Bs_aipw, compute_aipw_estimator(resampled_df))  
+# }
+# 
+# tau_Bs_aipw <- sort(tau_Bs_aipw)
+# print(quantile(tau_Bs_aipw, c(0.025, 0.975)))
+```
+
+```{r}
+# Perform AIPW analysis on observational data
+library(tidyverse)
+obs_data <- read_csv("../datasets/processed/Observational_Data.csv") %>%
+  filter(!is.na(surg_type))
+obs_data <- obs_data %>% mutate(delta_day7 = day7 - day0)
+obs_data$z <- obs_data$a_ketamine
+obs_data$D <- obs_data$ket_per_kg
+obs_data$Y <- obs_data$delta_day7
+obs_data$gender <- obs_data$sex
+
+
+# # Estimate propensity score with logistic regression (excluding race and ethnicity covariates)
+# obs_data$prop <- glm(z ~ age + bmi + gender + a_los + day0, 
+#                      family=binomial, data=obs_data)$fitted.values
+```
+
+```{r}
+# Estimate ATE_AIPW for various min_ket_dose thresholds
+set.seed(10000)
+min_ket_dose <- seq(0.2, 0.6, by = 0.1)
+M = 1000
+tau_hat_aipws <- matrix(nrow = 0, ncol = 4)
+
+for (dosage in min_ket_dose) {
+  # Filter data to only include control units or those with minimum ket dosage
+  data_subset <- obs_data %>% filter((ket_per_kg >= dosage) | (z == 0))
+  # Estimate propensity score with logistic regression (excluding race and ethnicity covariates)
+  data_subset$prop <- glm( z ~ age + sex + bmi + a_los + day0, 
+                           family = binomial, 
+                           data = data_subset)$fitted.values
+  tau_hat_aipw <- compute_aipw_estimator(data_subset)
+  result <- get_aipw_inference(data_subset, M, tau_hat_aipw)
+  
+  tau_hat_aipws <- rbind(tau_hat_aipws, c(tau_hat_aipw, result$p_val, result$ci[1], result$ci[2]))
+} 
+
+tau_hat_aipws <- cbind(min_ket_dose, tau_hat_aipws)
+colnames(tau_hat_aipws) <- c("min_ket_dose", "tau_hat_aipw", "p-value", "CI_lower", "CI_upper")
+print(tau_hat_aipws)
+```
+
+```{r}
+aipw_plot_df <- as.data.frame(tau_hat_aipws[1:5, ])
+
+ggplot(aipw_plot_df, aes(x = min_ket_dose, y = tau_hat_aipw, ymin = CI_lower, ymax = CI_upper)) +
+  geom_point() +
+  geom_errorbar(width = 0.05) +
+  geom_hline(yintercept = 0, linetype = 2, col = rgb(0, 0, 0, alpha = 0.5)) +
+  theme_bw() +
+  labs(x = "Dosage Threshold", y = "Effect Estimate") +
+  scale_x_continuous(breaks = min_ket_dose) + 
+  theme(axis.text = element_text(size = 14), axis.title = element_text(size = 14))
+ggsave("aipw-sensitivity.png", width = 7, height = 4)
+```
+
+
